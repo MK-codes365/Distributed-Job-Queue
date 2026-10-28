@@ -97,19 +97,24 @@ def test_fail_exponential_backoff(mock_time):
     assert record["last_error"] == "temporary network glitch"
 
 
-def test_fail_dead_letter_queue(monkeypatch):
+def test_fail_dead_letter_queue(mock_time, monkeypatch):
     monkeypatch.setattr(config, "MAX_ATTEMPTS", 2)
 
     job_id, _ = queue.enqueue("flaky")
-    queue.claim()
+    claimed_1 = queue.claim()
+    assert claimed_1 == job_id
 
     # Attempt 1 -> retry
     outcome_1 = queue.fail(job_id, "error 1")
     assert outcome_1 == "retry"
 
-    # Promote and claim again
-    queue.promote(limit=10)
-    queue.claim()
+    # Advance time past exponential backoff delay, then promote and claim again
+    mock_time(config.BACKOFF_BASE + 5)
+    promoted = queue.promote(limit=10)
+    assert promoted == 1
+
+    claimed_2 = queue.claim()
+    assert claimed_2 == job_id
 
     # Attempt 2 -> dead letter queue
     outcome_2 = queue.fail(job_id, "error 2")
@@ -193,4 +198,3 @@ def test_delayed_job_promotion(mock_time):
     # Should now be claimable
     claimed_id = queue.claim()
     assert claimed_id == job_id
-
